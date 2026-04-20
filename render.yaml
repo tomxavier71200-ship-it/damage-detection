@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: damage-lens-ai
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && python download_models.py
+    startCommand: gunicorn app:app
