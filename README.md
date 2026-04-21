@@ -1,3 +1,16 @@
+
+
+
+---
+title: Car Damage Detection
+emoji: 🚗
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+app_file: app.py
+pinned: false
+---
+
 # Car Damage Detection Website
 
 This project turns your Google Colab YOLO workflow into a local website.
