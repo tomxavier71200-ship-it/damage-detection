@@ -4,4 +4,4 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt && python download_models.py
-    startCommand: gunicorn app:app
+    startCommand: gunicorn --workers 1 --timeout 180 app:app

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import threading
 import uuid
@@ -18,7 +19,7 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_DAMAGE_CONFIDENCE = 0.18
 DEFAULT_PARTS_CONFIDENCE = 0.22
 DEFAULT_IOU = 0.45
-DEFAULT_IMAGE_SIZE = 960
+DEFAULT_IMAGE_SIZE = 640
 DAMAGE_MODEL_PATH = BASE_DIR / "car_damage_seg.pt"
 PARTS_MODEL_PATH = BASE_DIR / "car_parts_seg.pt"
 
@@ -40,8 +41,9 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 128 * 1024 * 1024
 
+# Models are loaded per use and released afterwards (no cache) so that only one
+# YOLO model is resident at a time; this keeps memory within Render's 512 MB free tier.
 MODEL_LOCK = threading.Lock()
-MODEL_CACHE: dict[str, YOLO] = {}
 
 
 @dataclass
@@ -79,12 +81,31 @@ def parse_float(value: str | None, default: float, lower: float, upper: float) -
         return default
 
 
-def load_model(model_path: Path) -> YOLO:
-    model_key = str(model_path)
+def run_model(
+    model_path: Path,
+    image: np.ndarray,
+    confidence: float,
+    iou_threshold: float,
+    image_width: int,
+    image_height: int,
+) -> list[dict[str, Any]]:
+    """Load one model, run it, copy out plain entries, then free the model."""
     with MODEL_LOCK:
-        if model_key not in MODEL_CACHE:
-            MODEL_CACHE[model_key] = YOLO(str(model_path))
-        return MODEL_CACHE[model_key]
+        model = YOLO(str(model_path))
+        try:
+            result = model.predict(
+                source=image,
+                conf=confidence,
+                iou=iou_threshold,
+                imgsz=DEFAULT_IMAGE_SIZE,
+                verbose=False,
+            )[0]
+            entries = extract_prediction_entries(result, image_width, image_height)
+            del result
+        finally:
+            del model
+            gc.collect()
+    return entries
 
 
 def model_files_ready() -> tuple[bool, list[str]]:
@@ -373,8 +394,6 @@ def summarize_findings(findings: list[dict[str, Any]], parts_entries: list[dict[
 
 
 def build_report(
-    damage_model: YOLO,
-    parts_model: YOLO,
     image_path: Path,
     damage_confidence: float,
     parts_confidence: float,
@@ -386,23 +405,13 @@ def build_report(
 
     image_height, image_width = original.shape[:2]
 
-    damage_result = damage_model.predict(
-        source=original,
-        conf=damage_confidence,
-        iou=iou_threshold,
-        imgsz=DEFAULT_IMAGE_SIZE,
-        verbose=False,
-    )[0]
-    parts_result = parts_model.predict(
-        source=original,
-        conf=parts_confidence,
-        iou=iou_threshold,
-        imgsz=DEFAULT_IMAGE_SIZE,
-        verbose=False,
-    )[0]
-
-    damage_entries = extract_prediction_entries(damage_result, image_width, image_height)
-    parts_entries = extract_prediction_entries(parts_result, image_width, image_height)
+    # Damage model runs and is released before the parts model is loaded.
+    damage_entries = run_model(
+        DAMAGE_MODEL_PATH, original, damage_confidence, iou_threshold, image_width, image_height
+    )
+    parts_entries = run_model(
+        PARTS_MODEL_PATH, original, parts_confidence, iou_threshold, image_width, image_height
+    )
     findings = build_damage_findings(damage_entries, parts_entries, image_width, image_height)
     parts_found = sorted({part["label_pretty"] for part in parts_entries})
 
@@ -503,8 +512,6 @@ def index():
             )
 
         try:
-            damage_model = load_model(DAMAGE_MODEL_PATH)
-            parts_model = load_model(PARTS_MODEL_PATH)
             info = (
                 "Using local task-specific models: car damage segmentation plus car parts segmentation. "
                 "This is a much better setup than a generic object detector for this task."
@@ -515,8 +522,6 @@ def index():
                 try:
                     reports.append(
                         build_report(
-                            damage_model,
-                            parts_model,
                             image_path,
                             damage_confidence,
                             parts_confidence,
