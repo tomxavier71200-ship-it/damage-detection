@@ -20,8 +20,8 @@ DEFAULT_DAMAGE_CONFIDENCE = 0.18
 DEFAULT_PARTS_CONFIDENCE = 0.22
 DEFAULT_IOU = 0.45
 DEFAULT_IMAGE_SIZE = 640
-DAMAGE_MODEL_PATH = BASE_DIR / "car_damage_seg.pt"
-PARTS_MODEL_PATH = BASE_DIR / "car_parts_seg.pt"
+DAMAGE_MODEL_PATH = BASE_DIR / "car_damage_seg.onnx"
+PARTS_MODEL_PATH = BASE_DIR / "car_parts_seg.onnx"
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -35,14 +35,15 @@ os.environ.setdefault("YOLO_CONFIG_DIR", str(YOLO_CONFIG_DIR))
 import cv2
 import numpy as np
 from flask import Flask, render_template, request
-from ultralytics import YOLO
 from werkzeug.utils import secure_filename
+
+import onnx_seg
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 128 * 1024 * 1024
 
 # Models are loaded per use and released afterwards (no cache) so that only one
-# YOLO model is resident at a time; this keeps memory within Render's 512 MB free tier.
+# ONNX model is resident at a time; this keeps memory within Render's 512 MB free tier.
 MODEL_LOCK = threading.Lock()
 
 
@@ -91,19 +92,20 @@ def run_model(
 ) -> list[dict[str, Any]]:
     """Load one model, run it, copy out plain entries, then free the model."""
     with MODEL_LOCK:
-        model = YOLO(str(model_path))
+        session = onnx_seg.create_session(model_path)
         try:
-            result = model.predict(
-                source=image,
-                conf=confidence,
-                iou=iou_threshold,
-                imgsz=DEFAULT_IMAGE_SIZE,
-                verbose=False,
-            )[0]
+            result = onnx_seg.predict(
+                session,
+                onnx_seg.read_names(session),
+                image,
+                confidence,
+                iou_threshold,
+                DEFAULT_IMAGE_SIZE,
+            )
             entries = extract_prediction_entries(result, image_width, image_height)
             del result
         finally:
-            del model
+            del session
             gc.collect()
     return entries
 
@@ -163,15 +165,16 @@ def normalize_mask(mask_array: np.ndarray | None) -> np.ndarray | None:
     return (mask_array > 0.5).astype(np.uint8)
 
 
-def extract_prediction_entries(result, image_width: int, image_height: int) -> list[dict[str, Any]]:
-    boxes = result.boxes
-    masks = result.masks.data.cpu().numpy() if result.masks is not None else None
+def extract_prediction_entries(
+    result: onnx_seg.SegmentationResult, image_width: int, image_height: int
+) -> list[dict[str, Any]]:
+    masks = result.masks
     entries: list[dict[str, Any]] = []
 
-    for index, box in enumerate(boxes):
-        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-        confidence_ratio = float(box.conf)
-        class_id = int(box.cls)
+    for index in range(len(result.confidences)):
+        x1, y1, x2, y2 = result.boxes_xyxy[index].astype(int)
+        confidence_ratio = float(result.confidences[index])
+        class_id = int(result.class_ids[index])
         label = result.names[class_id]
         width = max(1, x2 - x1)
         height = max(1, y2 - y1)
