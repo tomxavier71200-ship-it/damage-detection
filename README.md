@@ -1,69 +1,126 @@
+# DamageLens AI
 
+AI-assisted vehicle damage assessment and reporting.
 
+DamageLens AI analyzes vehicle inspection images using two task-specific computer-vision models:
 
----
-title: Car Damage Detection
-emoji: 🚗
-colorFrom: blue
-colorTo: purple
-sdk: gradio
-app_file: app.py
-pinned: false
----
+1. **Vehicle damage segmentation** to identify visible damage such as scratches, dents, cracks, broken lamps, glass damage, and flat tires.
+2. **Vehicle-part segmentation** to identify vehicle components and associate detected damage with the most likely affected component.
 
-# Car Damage Detection Website
+The application then produces structured inspection findings including damage type, confidence, estimated size, severity, component match, image zone, and batch-level summary metrics.
 
-This project turns your Google Colab YOLO workflow into a local website.
+## Product workflow
 
-## What it does
+```text
+Vehicle inspection photos
+        ↓
+Damage segmentation
+        ↓
+Vehicle-part segmentation
+        ↓
+Damage/component matching
+        ↓
+Severity + confidence estimation
+        ↓
+Structured inspection findings
+```
 
-- Upload a YOLO model file like `trained.pt`
-- Upload one or more car images
-- Run damage detection in the browser-backed web app
-- Show annotated images with generated damage reports
+The current application is an MVP focused on computer-vision-assisted inspection. A planned Claude layer can transform structured findings into human-readable inspection reports and assist with inspection workflow automation.
+
+## Current features
+
+- Upload one or multiple vehicle images
+- Automatic use of the bundled task-specific models
+- Damage segmentation
+- Vehicle-part segmentation
+- Damage-to-component matching
+- Confidence bands
+- Heuristic severity estimation
+- Estimated damage size and image zone
+- Annotated inspection images
+- Batch-level inspection summary
+- Adjustable damage confidence, parts confidence, and IoU thresholds
+
+## Technology
+
+- Python
+- Flask
+- Ultralytics YOLO
+- OpenCV
+- NumPy
+- Gunicorn
+- Render
 
 ## Run locally
 
-1. Create and activate a virtual environment.
-2. Install dependencies:
+Create and activate a virtual environment, then install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Start the app:
+Download the model weights:
+
+```bash
+python download_models.py
+```
+
+Start the application:
 
 ```bash
 python app.py
 ```
 
-4. Open the local URL shown in the terminal, usually `http://127.0.0.1:5000`.
-
-## Deploy publicly on Render
-
-This project is prepared for Render with `render.yaml` and a `Procfile`.
-
-1. Push this folder to a GitHub repository.
-2. Sign in to [Render](https://render.com/).
-3. Create a new `Web Service` from your GitHub repo.
-4. Render should detect:
+Open:
 
 ```text
-Build Command: pip install -r requirements.txt && python download_models.py
-Start Command: gunicorn app:app
+http://127.0.0.1:5000
 ```
 
-5. Deploy the service and wait for the first build to finish.
-6. Open the public `onrender.com` URL Render gives you.
+## Deploy on Render
 
-## Public deployment notes
+The repository contains a `render.yaml` Blueprint configuration.
 
-- This project downloads the two task-specific model files during the Render build step.
-- Do not commit large `.pt` weights into GitHub directly; they are ignored by `.gitignore`.
-- The public site uses a damage-segmentation model plus a parts-segmentation model automatically.
+Build command:
 
-## Notes
+```bash
+pip install -r requirements.txt && python download_models.py
+```
 
-- The app expects a trained Ultralytics YOLO `.pt` model.
-- Uploaded model files are deleted after processing.
-- Result images are saved under `static/results/`.
+Start command:
+
+```bash
+gunicorn app:app
+```
+
+The model weights are downloaded during the build instead of being committed as large binary files to GitHub.
+
+## Project structure
+
+```text
+damage-detection/
+├── app.py
+├── download_models.py
+├── render.yaml
+├── Procfile
+├── requirements.txt
+├── templates/
+│   └── index.html
+└── static/
+    └── styles.css
+```
+
+## Product notes
+
+The severity value is currently a **heuristic estimate** based on detected damage area, model confidence, and damage type. It is not a validated insurance, repair-cost, or safety assessment.
+
+Model weights are downloaded from their respective model repositories during deployment. Review the applicable model and framework licenses before commercial use.
+
+## Roadmap
+
+- Claude-assisted inspection report generation
+- Multi-image case summaries
+- Exportable inspection reports
+- Inspection history and case management
+- API access
+- Human-review workflow
