@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets
+.env
+.env.*
+
+# Model weights (downloaded at build time by download_models.py)
+*.pt
+*.onnx
+
+# Runtime data created by app.py
+uploads/
+static/results/
+.runtime-cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
